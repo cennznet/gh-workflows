@@ -1,0 +1,60 @@
+name: "[Reusable] Labeled Deployment"
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        type: string
+        required: true
+      release_prefix:
+        type: string
+        required: false
+        default: "release/v"
+      hotfix_prefix:
+        type: string
+        required: false
+        default: "hotfix/v"
+
+jobs:
+  new-labeled-deployment:
+    name: "Deployment"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Identify channel and version number"
+        id: identify
+        run: |
+          if ${{ startsWith(env.head_ref, env.hotfix_prefix) }}; then
+            version="${head_ref/$hotfix_prefix/v}"
+            type=Hotfix
+          fi
+
+          if ${{ startsWith(env.head_ref, env.release_prefix) }}; then
+            version="${head_ref/$release_prefix/v}"
+            type=Release
+          fi
+
+          echo "::set-output name=version::${version}"
+          echo "::set-output name=type::${type}"
+          echo "::set-output name=date::$(date +'%Y-%m-%d %T+%Z')"
+        env:
+          head_ref: ${{ github.head_ref }}
+          release_prefix: ${{ inputs.release_prefix }}
+          hotfix_prefix: ${{ inputs.hotfix_prefix }}
+
+      - name: Checkout branch `${{ github.head_ref }}`
+        if: steps.identify.outputs.version != ''
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Initialize mandatory git config
+        run: |
+          git config user.name "GitHub actions"
+          git config user.email noreply@github.com
+
+      - name: Tag and set `${{ inputs.branch }}` to `${{ github.head_ref }}`
+        if: steps.identify.outputs.version != ''
+        run: |
+          git tag -a "${{ inputs.branch }}/${{ steps.identify.outputs.version }}" -m "${{ steps.identify.outputs.type }} at ${{ steps.identify.outputs.date }}"
+          git checkout -b ${{ inputs.branch }} ${{ inputs.branch }}/${{ steps.identify.outputs.version }}
+          git push origin ${{ inputs.branch }} --tags --force
